@@ -35,10 +35,39 @@
             license = licenses.mit;
           };
         };
+
+        setup-tdarr = pkgs.stdenv.mkDerivation {
+          pname = "setup-tdarr";
+          version = "1";
+          src = ./.;
+          dontPatchELF = true;
+          buildInputs = [ pkgs.coreutils ];
+          buildPhase = ''
+            mkdir -p $out/bin
+            install -m755 ${./setup-tdarr.sh} $out/bin/setup-tdarr
+          '';
+          meta = with pkgs.lib; {
+            description = "Tdarr setup helper script packaged as an executable";
+            license = licenses.mit;
+          };
+        };
       });
 
       # convenience defaultPackage for `nix build`
       defaultPackage.x86_64-linux = packages.x86_64-linux.compose;
+
+      # devShell for local development with docker tooling
+      devShells.x86_64-linux.default = let pkgs = import nixpkgs { system = "x86_64-linux"; }; in pkgs.mkShell {
+        buildInputs = [ pkgs.docker pkgs.docker-compose pkgs.lazydocker pkgs.git pkgs.jq ];
+        shellHook = ''
+          echo "Entering devShell: docker, docker-compose, lazydocker available"
+        '';
+      };
+
+      apps.x86_64-linux.setup-tdarr = {
+        type = "app";
+        program = "${packages.x86_64-linux.setup-tdarr}/bin/setup-tdarr";
+      };
 
       # expose the original module as a NixOS module so it can still be used
       nixosModules = {
