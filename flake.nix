@@ -72,6 +72,7 @@
       # expose the original module as a NixOS module so it can still be used
       nixosModules = {
         default = import ./nixos-module.nix;
+        tdarr = import ./modules/tdarr.nix;
       };
     };
 }
