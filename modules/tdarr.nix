@@ -32,20 +32,34 @@ in
       default = { user = "me"; pass = "changeme"; };
       description = "Credentials used for authenticated SMB shares.";
     };
+
+    smbShares = lib.mkOption {
+      type = lib.types.attrs;
+      default = {
+        hass_share = { path = "//192.168.1.210/share"; auth = "auth"; };
+        hass_media = { path = "//192.168.1.210/media"; auth = "auth"; };
+        hass_config = { path = "//192.168.1.210/config"; auth = "auth"; };
+        usb_share = { path = "//192.168.1.47/USB-Share"; auth = "guest"; };
+      };
+      description = "Map of SMB shares to mount via autofs. Each value is an attrset with 'path' and 'auth' (auth|guest).";
+    };
   };
 
   config = lib.mkIf cfg.enable {
     # Ensure required packages are present
     environment.systemPackages = with pkgs; [ docker autofs docker-compose lazydocker ];
 
-    # Create directories used by Tdarr
-    systemd.tmpfiles.rules = lib.mkForce (lib.concatLists (lib.mapAttrsToList (name: _:
-      [ "d ${cfg.tdarrBase} 0755 root root -",
+    # Create tmpfiles rules to ensure `tdarr` directories exist (including mounts)
+    systemd.tmpfiles.rules = lib.mkForce (
+      let
+        shareNames = lib.attrNames cfg.smbShares;
+        shareDirs = builtins.map (name: "d ${cfg.tdarrBase}/mounts/${name} 0755 root root -") shareNames;
+      in lib.concatLists [ [
+        "d ${cfg.tdarrBase} 0755 root root -",
         "d ${cfg.tdarrBase}/mounts 0755 root root -",
-        "d ${cfg.tdarrBase}/mounts/hass_share 0755 root root -",
         "d ${cfg.tdarrBase}/configs 0755 root root -",
         "d ${cfg.tdarrBase}/wud 0755 root root -"
-      ]) {}));
+      ] shareDirs ]);
 
     # Write SMB credentials file for autofs maps
     environment.etc."auto.smb.210".text = ''
@@ -53,17 +67,14 @@ username=${cfg.smbCreds.user}
 password=${cfg.smbCreds.pass}
 '';
 
-    # Simple autofs map tailored for the typical Tdarr shares
-    environment.etc."auto.tdarr".text = ''
-# Tdarr SMB shares autofs map
-hass_share  -fstype=cifs,vers=3.1.1,credentials=/etc/auto.smb.210,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://${cfg.serverIP}/share
-hass_media  -fstype=cifs,vers=3.1.1,credentials=/etc/auto.smb.210,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://${cfg.serverIP}/media
-hass_config -fstype=cifs,vers=3.1.1,credentials=/etc/auto.smb.210,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://${cfg.serverIP}/config
-# Example guest shares (adjust as needed)
-usb_share   -fstype=cifs,vers=3.1.1,guest,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://192.168.1.47/USB-Share
-usb_share_2 -fstype=cifs,vers=3.1.1,guest,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://192.168.1.47/USB-Share-2
-rom_share   -fstype=cifs,vers=3.1.1,guest,uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 ://192.168.1.47/ROM-Share
-'';
+    # Generate autofs map from `smbShares` option
+    environment.etc."auto.tdarr".text = let
+      shareNames = lib.attrNames cfg.smbShares;
+      mkLine = name: let
+        share = builtins.getAttr name cfg.smbShares;
+        authPart = if share.auth == "auth" then "credentials=/etc/auto.smb.210," else "guest,";
+      in "${name} -fstype=cifs,vers=3.1.1,${authPart}uid=${toString cfg.puid},gid=${toString cfg.pgid},iocharset=utf8,soft,actimeo=1 :${share.path}";
+    in lib.concatStringsSep "\n" (builtins.map mkLine shareNames);
 
     # Add autofs master entry so mounts occur under tdarr base
     environment.etc."auto.master.d/tdarr.autofs".text = ''

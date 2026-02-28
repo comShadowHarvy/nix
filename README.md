@@ -59,3 +59,37 @@ The `nvim` directory contains your Neovim configuration. Edit files under `nvim/
 
 - If this repo previously recorded `nvim` as a submodule, it was converted into a regular tracked directory.
 - If you want me to push the recent commits (including this README), tell me and I'll push to `origin main`.
+
+## Enable NixOS module
+
+To enable the declarative Tdarr configuration on your NixOS server (using this flake), add the module and enable `services.tdarr` in your system configuration. Example `flake.nix` usage:
+
+```nix
+# in your NixOS system flake or configuration
+inputs.nix.url = "github:NixOS/nixpkgs";
+
+outputs = { self, nixpkgs, ... }:
+{
+	nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+		system = "x86_64-linux";
+		modules = [ ./nix/flake.nix?tdarr ]; # imports the tdarr module from this repo
+		configuration = {
+			services.tdarr.enable = true;
+			services.tdarr.smbCreds.user = "myuser";
+			services.tdarr.smbCreds.pass = "supersecret";
+			# override shares if needed
+			services.tdarr.smbShares = {
+				hass_share = { path = "//192.168.1.210/share"; auth = "auth"; };
+			};
+		};
+	};
+};
+```
+
+After updating your flake configuration, apply with:
+
+```bash
+nixos-rebuild switch --flake .#myhost
+```
+
+The module will ensure autofs maps, SMB credential file, compose file, Docker, and a systemd service to start the Tdarr containers are configured.
